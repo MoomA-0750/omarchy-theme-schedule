@@ -1,0 +1,15 @@
+# theme-schedule settings (read by ~/.local/bin/theme-schedule)
+
+# auto (switch by time) or manual
+# Change it from the menu (Appearance > Light/Dark) or with `theme-schedule auto|manual`.
+MODE=manual
+
+# When to switch to the light and the dark theme (HH:MM)
+LIGHT_AT=07:00
+DARK_AT=18:00
+
+# Pairs that the naming rule (<name>-light and <name>) does not find.
+# One pair per line, light theme first, using the theme directory names.
+PAIRS=(
+  "catppuccin-latte catppuccin"
+)

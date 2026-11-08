@@ -1,0 +1,271 @@
+#!/bin/bash
+# theme-schedule — switch an Omarchy theme between its light and dark variant
+# by time of day, or leave it manual.
+#
+# Finding the partner theme (first match wins):
+#   1. a pair listed in PAIRS in the config file
+#   2. the naming rule: <name>-light <-> <name> (or <name>-dark)
+# Which side is light is read from each theme's colors.toml (`mode`).
+# Themes without a partner are left alone.
+#
+# In auto mode the theme changes only on the first run after a switch time,
+# so a theme picked by hand stays until the next switch time.
+#
+# Usage:
+#   theme-schedule           in auto mode, switch if a switch time has passed (run by the timer)
+#   theme-schedule auto      switch to auto mode and apply the theme for the current time
+#   theme-schedule manual    switch to manual mode (keeps the current theme)
+#   theme-schedule toggle    toggle between auto and manual
+#   theme-schedule mode      print the current mode (auto/manual)
+#   theme-schedule --now     apply the theme for the current time right away
+#   theme-schedule --status  print mode, current theme, partner and period
+#   theme-schedule language  print the language used for messages (ja/en)
+#   theme-schedule menu [install|remove]
+#                            add (or remove) the Light/Dark entries in the Omarchy menu,
+#                            labelled in the current language
+
+CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/theme-schedule.conf"
+STATE="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy/theme-schedule.last"
+CURRENT_FILE="$HOME/.local/state/omarchy/current/theme.name"
+MENU_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/extensions/omarchy-menu.jsonc"
+OMARCHY_THEMES="${OMARCHY_PATH:-/usr/share/omarchy}/themes"
+USER_THEMES="$HOME/.config/omarchy/themes"
+SELF="$(readlink -f "${BASH_SOURCE[0]}")"
+
+MODE=manual
+LIGHT_AT=07:00
+DARK_AT=18:00
+PAIRS=()
+[[ -f $CONFIG ]] && source "$CONFIG"
+
+# --- language ---------------------------------------------------------------
+# Omarchy's own language setting wins; otherwise the locale. Japanese and
+# English are bundled; anything else falls back to English.
+
+detect_language() {
+  local code="" file="${OMARCHY_LANGUAGE_FILE:-${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/language}"
+  [[ -f $file ]] && code=$(head -n 1 "$file" | tr -d '[:space:]')
+  [[ -n $code ]] || code=${LC_ALL:-${LC_MESSAGES:-${LANG:-en}}}
+  case $code in
+    ja*) echo ja ;;
+    *) echo en ;;
+  esac
+}
+LANGUAGE=${THEME_SCHEDULE_LANGUAGE:-$(detect_language)}
+
+# msg <key> [args...] — printf-style, %s placeholders
+msg() {
+  local key=$1 fmt
+  shift
+  if [[ $LANGUAGE == ja ]]; then
+    case $key in
+      notify_auto)   fmt='ライト/ダーク: 自動（%s から明るい版 / %s から暗い版）' ;;
+      notify_manual) fmt='ライト/ダーク: 手動' ;;
+      st_mode)       fmt='切り替え方: %s' ;;
+      st_current)    fmt='今のテーマ: %s' ;;
+      st_partner)    fmt='組のテーマ: %s' ;;
+      st_period)     fmt='時間帯:     %s（%s から明るい版 / %s から暗い版）' ;;
+      none)          fmt='なし' ;;
+      unknown)       fmt='不明' ;;
+      menu_title)    fmt='Light/Dark' ;;
+      menu_desc)     fmt='明るい版と暗い版の切り替え方' ;;
+      menu_auto)     fmt='自動（時刻で切り替え）' ;;
+      menu_manual)   fmt='手動' ;;
+      menu_added)    fmt='メニューに追加しました: %s' ;;
+      menu_removed)  fmt='メニューから外しました: %s' ;;
+      usage)         fmt='使い方: theme-schedule [auto|manual|toggle|mode|--now|--status|menu [install|remove]]' ;;
+    esac
+  fi
+  if [[ -z ${fmt:-} ]]; then
+    case $key in
+      notify_auto)   fmt='Light/Dark: automatic (light from %s, dark from %s)' ;;
+      notify_manual) fmt='Light/Dark: manual' ;;
+      st_mode)       fmt='Mode:          %s' ;;
+      st_current)    fmt='Current theme: %s' ;;
+      st_partner)    fmt='Partner theme: %s' ;;
+      st_period)     fmt='Period:        %s (light from %s, dark from %s)' ;;
+      none)          fmt='none' ;;
+      unknown)       fmt='unknown' ;;
+      menu_title)    fmt='Light/Dark' ;;
+      menu_desc)     fmt='How to switch between light and dark themes' ;;
+      menu_auto)     fmt='Automatic (by time)' ;;
+      menu_manual)   fmt='Manual' ;;
+      menu_added)    fmt='Added to the menu: %s' ;;
+      menu_removed)  fmt='Removed from the menu: %s' ;;
+      usage)         fmt='Usage: theme-schedule [auto|manual|toggle|mode|--now|--status|menu [install|remove]]' ;;
+      *)             fmt=$key ;;
+    esac
+  fi
+  # shellcheck disable=SC2059
+  printf "$fmt" "$@"
+}
+
+notify() {
+  command -v omarchy-notification-send >/dev/null && omarchy-notification-send -g 󰔎 "$1"
+}
+
+# --- menu -------------------------------------------------------------------
+
+MENU_BEGIN='  // theme-schedule begin (managed by theme-schedule menu)'
+MENU_END='  // theme-schedule end'
+
+menu_remove() {
+  [[ -f $MENU_FILE ]] || return 0
+  sed -i "\|^$MENU_BEGIN\$|,\|^$MENU_END\$|d" "$MENU_FILE"
+}
+
+menu_install() {
+  local cmd="\$HOME/.local/bin/theme-schedule"
+  [[ $SELF == "$HOME/.local/bin/theme-schedule" ]] || cmd=$SELF
+
+  mkdir -p "$(dirname "$MENU_FILE")"
+  [[ -f $MENU_FILE ]] || printf '{\n}\n' >"$MENU_FILE"
+  menu_remove
+
+  local block
+  block=$(cat <<EOF
+$MENU_BEGIN
+  "appearance.lightdark": {"icon":"󰔎","label":"$(msg menu_title)","aliases":["lightdark","darkmode"],"description":"$(msg menu_desc)"},
+  "appearance.lightdark.auto": {"icon":"󰥔","label":"$(msg menu_auto)","action":"$cmd auto","checked":"[ \\"\$($cmd mode)\\" = auto ]"},
+  "appearance.lightdark.manual": {"icon":"󰆾","label":"$(msg menu_manual)","action":"$cmd manual","checked":"[ \\"\$($cmd mode)\\" = manual ]"},
+$MENU_END
+EOF
+)
+  # Insert before the last closing brace of the file.
+  local last
+  last=$(grep -n '^[[:space:]]*}[[:space:]]*$' "$MENU_FILE" | tail -1 | cut -d: -f1)
+  if [[ -z $last ]]; then
+    echo "theme-schedule: cannot find the closing brace in $MENU_FILE" >&2
+    return 1
+  fi
+  local tmp
+  tmp=$(mktemp)
+  { head -n $((last - 1)) "$MENU_FILE"; printf '%s\n' "$block"; tail -n +"$last" "$MENU_FILE"; } >"$tmp"
+  cat "$tmp" >"$MENU_FILE"
+  rm -f "$tmp"
+}
+
+# --- themes -----------------------------------------------------------------
+
+theme_exists() {
+  [[ -d $USER_THEMES/$1 || -d $OMARCHY_THEMES/$1 ]]
+}
+
+theme_mode() {
+  local dir
+  for dir in "$USER_THEMES/$1" "$OMARCHY_THEMES/$1"; do
+    if [[ -f $dir/colors.toml ]]; then
+      sed -n 's/^[[:space:]]*mode[[:space:]]*=[[:space:]]*"\([a-z]*\)".*/\1/p' "$dir/colors.toml" | head -1
+      return
+    fi
+  done
+}
+
+find_partner() {
+  local theme=$1 pair a b base candidate
+  for pair in "${PAIRS[@]}"; do
+    read -r a b <<<"$pair"
+    [[ $theme == "$a" ]] && { echo "$b"; return; }
+    [[ $theme == "$b" ]] && { echo "$a"; return; }
+  done
+
+  if [[ $theme == *-light ]]; then
+    base=${theme%-light}
+    for candidate in "$base" "$base-dark"; do
+      theme_exists "$candidate" && { echo "$candidate"; return; }
+    done
+  elif [[ $theme == *-dark ]]; then
+    base=${theme%-dark}
+    for candidate in "$base-light" "$base"; do
+      theme_exists "$candidate" && { echo "$candidate"; return; }
+    done
+  else
+    theme_exists "$theme-light" && { echo "$theme-light"; return; }
+    theme_exists "$theme-dark" && { echo "$theme-dark"; return; }
+  fi
+}
+
+# Most recent switch time (epoch seconds) and its period (light/dark).
+last_boundary() {
+  local now today yesterday best=0 kind="" t day
+  now=$(date +%s)
+  today=$(date +%F)
+  yesterday=$(date -d yesterday +%F)
+  for day in "$yesterday" "$today"; do
+    t=$(date -d "$day $LIGHT_AT" +%s); (( t <= now && t > best )) && { best=$t; kind=light; }
+    t=$(date -d "$day $DARK_AT" +%s);  (( t <= now && t > best )) && { best=$t; kind=dark; }
+  done
+  echo "$best $kind"
+}
+
+set_mode() {
+  mkdir -p "$(dirname "$CONFIG")"
+  if grep -q '^MODE=' "$CONFIG" 2>/dev/null; then
+    sed -i "s/^MODE=.*/MODE=$1/" "$CONFIG"
+  else
+    echo "MODE=$1" >>"$CONFIG"
+  fi
+  MODE=$1
+}
+
+# --- commands ---------------------------------------------------------------
+
+case ${1:-} in
+  -h|--help|help)
+    msg usage; echo; exit 0 ;;
+  mode)
+    echo "$MODE"; exit 0 ;;
+  language)
+    echo "$LANGUAGE"; exit 0 ;;
+  menu)
+    case ${2:-install} in
+      install) menu_install && { msg menu_added "$MENU_FILE"; echo; } ;;
+      remove)  menu_remove && { msg menu_removed "$MENU_FILE"; echo; } ;;
+      *) msg usage; echo; exit 1 ;;
+    esac
+    exit ;;
+  toggle)
+    [[ $MODE == auto ]] && set -- manual || set -- auto ;;
+esac
+
+case ${1:-} in
+  auto)
+    set_mode auto
+    notify "$(msg notify_auto "$LIGHT_AT" "$DARK_AT")"
+    set -- --now ;;
+  manual)
+    set_mode manual
+    notify "$(msg notify_manual)"
+    exit 0 ;;
+  ''|--now|--status) ;;
+  *)
+    msg usage >&2; echo >&2; exit 1 ;;
+esac
+
+current=$(cat "$CURRENT_FILE" 2>/dev/null)
+partner=$(find_partner "$current")
+read -r boundary period < <(last_boundary)
+
+if [[ ${1:-} == --status ]]; then
+  msg st_mode "$MODE"; echo
+  msg st_current "${current:-$(msg unknown)}${current:+ ($(theme_mode "$current"))}"; echo
+  msg st_partner "${partner:-$(msg none)}${partner:+ ($(theme_mode "$partner"))}"; echo
+  msg st_period "$period" "$LIGHT_AT" "$DARK_AT"; echo
+  exit 0
+fi
+
+[[ -n $current && -n $partner ]] || exit 0
+
+if [[ ${1:-} != --now ]]; then
+  [[ $MODE == auto ]] || exit 0
+  last=$(cat "$STATE" 2>/dev/null || echo 0)
+  (( boundary > last )) || exit 0
+fi
+
+mkdir -p "$(dirname "$STATE")"
+echo "$boundary" >"$STATE"
+
+[[ $(theme_mode "$current") == "$period" ]] && exit 0
+[[ $(theme_mode "$partner") == "$period" ]] || exit 0
+
+omarchy theme set "$partner"

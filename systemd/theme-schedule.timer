@@ -1,0 +1,8 @@
+[Unit]
+Description=Check the Omarchy light/dark theme schedule every minute
+
+[Timer]
+OnCalendar=minutely
+
+[Install]
+WantedBy=timers.target
