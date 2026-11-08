@@ -21,9 +21,12 @@
 #   theme-schedule auto      switch to auto mode (keeps the schedule) and apply it now
 #   theme-schedule time      auto mode with fixed clock times
 #   theme-schedule sun       auto mode with sunrise and sunset
+#   theme-schedule light     manual mode, and switch to the light variant now
+#   theme-schedule dark      manual mode, and switch to the dark variant now
 #   theme-schedule manual    switch to manual mode (keeps the current theme)
 #   theme-schedule toggle    toggle between auto and manual
-#   theme-schedule mode      print the current mode (auto/manual)
+#   theme-schedule mode      print the current mode (manual/time/sun)
+#   theme-schedule state     print what the menu marks: light/dark (manual) or time/sun
 #   theme-schedule --now     apply the theme for the current time right away
 #   theme-schedule --status  print mode, current theme, partner and period
 #   theme-schedule language  print the language used for messages (ja/en)
@@ -73,6 +76,12 @@ msg() {
       notify_auto)   fmt='ライト/ダーク: 自動（%s から明るい版 / %s から暗い版）' ;;
       notify_sun)    fmt='ライト/ダーク: 日の出・日の入りで自動（今日は %s から明るい版 / %s から暗い版）' ;;
       notify_manual) fmt='ライト/ダーク: 手動' ;;
+      notify_light)  fmt='ライト/ダーク: ライトに固定' ;;
+      notify_dark)   fmt='ライト/ダーク: ダークに固定' ;;
+      no_light)      fmt='%s には明るい版がありません' ;;
+      no_dark)       fmt='%s には暗い版がありません' ;;
+      menu_light)    fmt='ライト' ;;
+      menu_dark)     fmt='ダーク' ;;
       st_mode)       fmt='切り替え方: %s' ;;
       st_current)    fmt='今のテーマ: %s' ;;
       st_partner)    fmt='組のテーマ: %s' ;;
@@ -95,7 +104,7 @@ msg() {
       menu_manual)   fmt='手動' ;;
       menu_added)    fmt='メニューに追加しました: %s' ;;
       menu_removed)  fmt='メニューから外しました: %s' ;;
-      usage)         fmt='使い方: theme-schedule [auto|time|sun|manual|toggle|mode|--now|--status|menu [install|remove]]' ;;
+      usage)         fmt='使い方: theme-schedule [light|dark|auto|time|sun|manual|toggle|mode|--now|--status|menu [install|remove]]' ;;
     esac
   fi
   if [[ -z ${fmt:-} ]]; then
@@ -103,6 +112,12 @@ msg() {
       notify_auto)   fmt='Light/Dark: automatic (light from %s, dark from %s)' ;;
       notify_sun)    fmt='Light/Dark: sunrise and sunset (today light from %s, dark from %s)' ;;
       notify_manual) fmt='Light/Dark: manual' ;;
+      notify_light)  fmt='Light/Dark: light (manual)' ;;
+      notify_dark)   fmt='Light/Dark: dark (manual)' ;;
+      no_light)      fmt='%s has no light variant' ;;
+      no_dark)       fmt='%s has no dark variant' ;;
+      menu_light)    fmt='Light' ;;
+      menu_dark)     fmt='Dark' ;;
       st_mode)       fmt='Mode:          %s' ;;
       st_current)    fmt='Current theme: %s' ;;
       st_partner)    fmt='Partner theme: %s' ;;
@@ -125,7 +140,7 @@ msg() {
       menu_manual)   fmt='Manual' ;;
       menu_added)    fmt='Added to the menu: %s' ;;
       menu_removed)  fmt='Removed from the menu: %s' ;;
-      usage)         fmt='Usage: theme-schedule [auto|time|sun|manual|toggle|mode|--now|--status|menu [install|remove]]' ;;
+      usage)         fmt='Usage: theme-schedule [light|dark|auto|time|sun|manual|toggle|mode|--now|--status|menu [install|remove]]' ;;
       *)             fmt=$key ;;
     esac
   fi
@@ -159,9 +174,10 @@ menu_install() {
   block=$(cat <<EOF
 $MENU_BEGIN
   "appearance.lightdark": {"icon":"󰔎","label":"$(msg menu_title)","aliases":["lightdark","darkmode"],"description":"$(msg menu_desc)"},
-  "appearance.lightdark.time": {"icon":"󰥔","label":"$(msg menu_time)","action":"$cmd time","checked":"[ \\"\$($cmd mode)\\" = time ]"},
-  "appearance.lightdark.sun": {"icon":"󰖜","label":"$(msg menu_sun)","action":"$cmd sun","checked":"[ \\"\$($cmd mode)\\" = sun ]"},
-  "appearance.lightdark.manual": {"icon":"󰆾","label":"$(msg menu_manual)","action":"$cmd manual","checked":"[ \\"\$($cmd mode)\\" = manual ]"},
+  "appearance.lightdark.light": {"icon":"󰖨","label":"$(msg menu_light)","action":"$cmd light","checked":"[ \\"\$($cmd state)\\" = light ]"},
+  "appearance.lightdark.dark": {"icon":"󰖔","label":"$(msg menu_dark)","action":"$cmd dark","checked":"[ \\"\$($cmd state)\\" = dark ]"},
+  "appearance.lightdark.time": {"icon":"󰥔","label":"$(msg menu_time)","action":"$cmd time","checked":"[ \\"\$($cmd state)\\" = time ]"},
+  "appearance.lightdark.sun": {"icon":"󰖜","label":"$(msg menu_sun)","action":"$cmd sun","checked":"[ \\"\$($cmd state)\\" = sun ]"},
 $MENU_END
 EOF
 )
@@ -334,6 +350,14 @@ case ${1:-} in
     msg usage; echo; exit 0 ;;
   mode)
     mode_word; exit 0 ;;
+  state)
+    if [[ $MODE == auto ]]; then
+      echo "$SCHEDULE"
+    else
+      m=$(theme_mode "$(cat "$CURRENT_FILE" 2>/dev/null)")
+      echo "${m:-manual}"
+    fi
+    exit 0 ;;
   language)
     echo "$LANGUAGE"; exit 0 ;;
   menu)
@@ -364,6 +388,7 @@ case ${1:-} in
     set_config MODE manual
     notify "$(msg notify_manual)"
     exit 0 ;;
+  light|dark) ;;
   ''|--now|--status) ;;
   *)
     msg usage >&2; echo >&2; exit 1 ;;
@@ -392,6 +417,22 @@ if [[ ${1:-} == --status ]]; then
     fi
   fi
   echo
+  exit 0
+fi
+
+if [[ ${1:-} == light || ${1:-} == dark ]]; then
+  want=$1
+  set_config MODE manual
+  if [[ $(theme_mode "$current") == "$want" ]]; then
+    :
+  elif [[ -n $partner && $(theme_mode "$partner") == "$want" ]]; then
+    omarchy theme set "$partner"
+  else
+    notify "$(msg "no_$want" "${current:-?}")"
+    msg "no_$want" "${current:-?}" >&2; echo >&2
+    exit 1
+  fi
+  notify "$(msg "notify_$want")"
   exit 0
 fi
 

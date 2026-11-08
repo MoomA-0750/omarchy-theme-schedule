@@ -8,8 +8,8 @@ Switch your [Omarchy](https://omarchy.org/) theme between its light and dark var
 
 - **Automatic (by time)**: light at `LIGHT_AT`, dark at `DARK_AT`.
 - **Automatic (sunrise and sunset)**: light at sunrise, dark at sunset. Computed offline — no network, no location service. The location is your system time zone's reference city unless you set `LOCATION`.
-- **Manual**: nothing happens on its own (the default).
-- Pick one from the Omarchy menu (**Appearance → Light/Dark**) or with `theme-schedule time|sun|manual`.
+- **Light** / **Dark**: switch to that variant now and keep it (manual mode, the default).
+- Pick one from the Omarchy menu (**Appearance → Light/Dark**, at the bottom) or with `theme-schedule light|dark|time|sun`.
 - If you change the theme by hand, it stays until the next switch time.
 - Themes without a light/dark partner are left alone.
 - Messages and menu labels follow your language: Omarchy's language setting first, then the locale. Japanese and English are bundled; other languages fall back to English.
@@ -47,10 +47,12 @@ It starts in manual mode. Turn on auto with `theme-schedule time` / `theme-sched
 ## Usage
 
 ```sh
+theme-schedule light      # manual, switch to the light variant now
+theme-schedule dark       # manual, switch to the dark variant now
 theme-schedule time       # automatic by clock time, and apply it now
 theme-schedule sun        # automatic by sunrise and sunset, and apply it now
 theme-schedule auto       # automatic with the last used schedule
-theme-schedule manual     # manual mode (the theme stays as it is)
+theme-schedule manual     # manual mode without changing the theme
 theme-schedule toggle     # flip between automatic and manual
 theme-schedule --status   # mode, themes, today's switch times, location
 theme-schedule --now      # apply the theme for the current time right away

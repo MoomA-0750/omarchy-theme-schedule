@@ -8,8 +8,8 @@
 
 - **自動（時刻）**: `LIGHT_AT` の時刻に明るい版、`DARK_AT` の時刻に暗い版へ切り替える。
 - **自動（日の出・日の入り）**: 日の出で明るい版、日の入りで暗い版へ切り替える。時刻は手元で計算し、ネットにも位置情報のサービスにも問い合わせない。場所は `LOCATION` を書かなければ、タイムゾーンの代表の都市を使う。
-- **手動**: 何もしない（入れた直後はこちら）。
-- どれにするかは、Omarchy のメニュー（**Appearance → Light/Dark**）か `theme-schedule time|sun|manual` で選ぶ。
+- **ライト** / **ダーク**: その場で明るい版か暗い版にして、そのままにする（手動。入れた直後はこちら）。
+- どれにするかは、Omarchy のメニュー（**Appearance → Light/Dark**、いちばん下）か `theme-schedule light|dark|time|sun` で選ぶ。
 - 途中で手でテーマを替えたら、次の切り替えの時刻までそのままにする。
 - 明るい版と暗い版の組がないテーマのときは何もしない。
 - 表示とメニューの言葉は、Omarchy の言語設定（なければロケール）に合わせる。日本語と英語があり、ほかの言語では英語になる。
@@ -47,10 +47,12 @@ cd omarchy-theme-schedule
 ## 使い方
 
 ```sh
+theme-schedule light      # 手動にして、明るい版にする
+theme-schedule dark       # 手動にして、暗い版にする
 theme-schedule time       # 時刻で自動にして、今の時間帯のテーマにする
 theme-schedule sun        # 日の出・日の入りで自動にして、今の時間帯のテーマにする
 theme-schedule auto       # 前に使った方で自動にする
-theme-schedule manual     # 手動にする（テーマは今のまま）
+theme-schedule manual     # テーマを変えずに手動にする
 theme-schedule toggle     # 自動と手動を入れ替える
 theme-schedule --status   # 切り替え方・テーマ・今日の切り替え時刻・場所を表示
 theme-schedule --now      # 今の時間帯のテーマにすぐ切り替える
