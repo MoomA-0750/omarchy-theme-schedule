@@ -1,12 +1,24 @@
 # theme-schedule の設定（~/.local/bin/theme-schedule が読む）
 
-# 切り替え方: auto（時刻で自動）か manual（手動）
-# メニューの Appearance → Light/Dark か、theme-schedule auto / manual で変えられる
+# 切り替え方: auto（自動）か manual（手動）
+# メニューの Appearance → Light/Dark か、theme-schedule time / sun / manual で変えられる
 MODE=manual
 
-# 明るい版にする時刻と、暗い版にする時刻（HH:MM）
+# 自動のときに何に合わせるか: time（LIGHT_AT / DARK_AT の時刻）か sun（日の出・日の入り）
+SCHEDULE=time
+
+# time のときの、明るい版にする時刻と暗い版にする時刻（HH:MM）。
+# sun でも、場所が分からないときと、日の出・日の入りがない日はこの時刻を使う。
 LIGHT_AT=07:00
 DARK_AT=18:00
+
+# sun のときの場所。「緯度,経度」を10進数で書く（北緯・東経がプラス）。例: "35.68,139.77"
+# 空のときはタイムゾーンから大まかに求める。
+LOCATION=""
+
+# 日の出・日の入りから何分ずらすか（マイナスで早める）
+SUNRISE_OFFSET=0
+SUNSET_OFFSET=0
 
 # 名前の決まり（<名前>-light と <名前>）で組にならないテーマを書く。
 # 1行に「明るい版 暗い版」の順で、テーマのフォルダ名を書く。

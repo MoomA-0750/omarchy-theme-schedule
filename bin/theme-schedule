@@ -11,9 +11,16 @@
 # In auto mode the theme changes only on the first run after a switch time,
 # so a theme picked by hand stays until the next switch time.
 #
+# Switch times come from one of two schedules:
+#   time  fixed clock times (LIGHT_AT / DARK_AT)
+#   sun   local sunrise and sunset, computed offline from LOCATION
+#         (or, when LOCATION is empty, from the system time zone)
+#
 # Usage:
 #   theme-schedule           in auto mode, switch if a switch time has passed (run by the timer)
-#   theme-schedule auto      switch to auto mode and apply the theme for the current time
+#   theme-schedule auto      switch to auto mode (keeps the schedule) and apply it now
+#   theme-schedule time      auto mode with fixed clock times
+#   theme-schedule sun       auto mode with sunrise and sunset
 #   theme-schedule manual    switch to manual mode (keeps the current theme)
 #   theme-schedule toggle    toggle between auto and manual
 #   theme-schedule mode      print the current mode (auto/manual)
@@ -33,8 +40,12 @@ USER_THEMES="$HOME/.config/omarchy/themes"
 SELF="$(readlink -f "${BASH_SOURCE[0]}")"
 
 MODE=manual
+SCHEDULE=time
 LIGHT_AT=07:00
 DARK_AT=18:00
+LOCATION=""
+SUNRISE_OFFSET=0
+SUNSET_OFFSET=0
 PAIRS=()
 [[ -f $CONFIG ]] && source "$CONFIG"
 
@@ -60,39 +71,61 @@ msg() {
   if [[ $LANGUAGE == ja ]]; then
     case $key in
       notify_auto)   fmt='ライト/ダーク: 自動（%s から明るい版 / %s から暗い版）' ;;
+      notify_sun)    fmt='ライト/ダーク: 日の出・日の入りで自動（今日は %s から明るい版 / %s から暗い版）' ;;
       notify_manual) fmt='ライト/ダーク: 手動' ;;
       st_mode)       fmt='切り替え方: %s' ;;
       st_current)    fmt='今のテーマ: %s' ;;
       st_partner)    fmt='組のテーマ: %s' ;;
-      st_period)     fmt='時間帯:     %s（%s から明るい版 / %s から暗い版）' ;;
+      st_period)     fmt='時間帯:     %s（今日は %s から明るい版 / %s から暗い版）' ;;
+      st_location)   fmt='場所:       %s' ;;
+      mode_manual)   fmt='手動' ;;
+      mode_time)     fmt='自動（時刻）' ;;
+      mode_sun)      fmt='自動（日の出・日の入り）' ;;
+      period_light)  fmt='明るい版' ;;
+      period_dark)   fmt='暗い版' ;;
+      polar)         fmt='（今日は日の出・日の入りがないので %s / %s を使う）' ;;
+      loc_tz)        fmt='%s（タイムゾーン %s から）' ;;
+      loc_none)      fmt='不明（LOCATION を設定してください。それまでは %s / %s を使う）' ;;
       none)          fmt='なし' ;;
       unknown)       fmt='不明' ;;
       menu_title)    fmt='Light/Dark' ;;
       menu_desc)     fmt='明るい版と暗い版の切り替え方' ;;
-      menu_auto)     fmt='自動（時刻で切り替え）' ;;
+      menu_time)     fmt='自動（時刻で切り替え）' ;;
+      menu_sun)      fmt='自動（日の出・日の入りで切り替え）' ;;
       menu_manual)   fmt='手動' ;;
       menu_added)    fmt='メニューに追加しました: %s' ;;
       menu_removed)  fmt='メニューから外しました: %s' ;;
-      usage)         fmt='使い方: theme-schedule [auto|manual|toggle|mode|--now|--status|menu [install|remove]]' ;;
+      usage)         fmt='使い方: theme-schedule [auto|time|sun|manual|toggle|mode|--now|--status|menu [install|remove]]' ;;
     esac
   fi
   if [[ -z ${fmt:-} ]]; then
     case $key in
       notify_auto)   fmt='Light/Dark: automatic (light from %s, dark from %s)' ;;
+      notify_sun)    fmt='Light/Dark: sunrise and sunset (today light from %s, dark from %s)' ;;
       notify_manual) fmt='Light/Dark: manual' ;;
       st_mode)       fmt='Mode:          %s' ;;
       st_current)    fmt='Current theme: %s' ;;
       st_partner)    fmt='Partner theme: %s' ;;
-      st_period)     fmt='Period:        %s (light from %s, dark from %s)' ;;
+      st_period)     fmt='Period:        %s (today light from %s, dark from %s)' ;;
+      st_location)   fmt='Location:      %s' ;;
+      mode_manual)   fmt='manual' ;;
+      mode_time)     fmt='automatic (clock times)' ;;
+      mode_sun)      fmt='automatic (sunrise and sunset)' ;;
+      period_light)  fmt='light' ;;
+      period_dark)   fmt='dark' ;;
+      polar)         fmt=' (no sunrise or sunset today, using %s / %s)' ;;
+      loc_tz)        fmt='%s (from time zone %s)' ;;
+      loc_none)      fmt='unknown (set LOCATION; using %s / %s until then)' ;;
       none)          fmt='none' ;;
       unknown)       fmt='unknown' ;;
       menu_title)    fmt='Light/Dark' ;;
       menu_desc)     fmt='How to switch between light and dark themes' ;;
-      menu_auto)     fmt='Automatic (by time)' ;;
+      menu_time)     fmt='Automatic (by time)' ;;
+      menu_sun)      fmt='Automatic (sunrise and sunset)' ;;
       menu_manual)   fmt='Manual' ;;
       menu_added)    fmt='Added to the menu: %s' ;;
       menu_removed)  fmt='Removed from the menu: %s' ;;
-      usage)         fmt='Usage: theme-schedule [auto|manual|toggle|mode|--now|--status|menu [install|remove]]' ;;
+      usage)         fmt='Usage: theme-schedule [auto|time|sun|manual|toggle|mode|--now|--status|menu [install|remove]]' ;;
       *)             fmt=$key ;;
     esac
   fi
@@ -126,7 +159,8 @@ menu_install() {
   block=$(cat <<EOF
 $MENU_BEGIN
   "appearance.lightdark": {"icon":"󰔎","label":"$(msg menu_title)","aliases":["lightdark","darkmode"],"description":"$(msg menu_desc)"},
-  "appearance.lightdark.auto": {"icon":"󰥔","label":"$(msg menu_auto)","action":"$cmd auto","checked":"[ \\"\$($cmd mode)\\" = auto ]"},
+  "appearance.lightdark.time": {"icon":"󰥔","label":"$(msg menu_time)","action":"$cmd time","checked":"[ \\"\$($cmd mode)\\" = time ]"},
+  "appearance.lightdark.sun": {"icon":"󰖜","label":"$(msg menu_sun)","action":"$cmd sun","checked":"[ \\"\$($cmd mode)\\" = sun ]"},
   "appearance.lightdark.manual": {"icon":"󰆾","label":"$(msg menu_manual)","action":"$cmd manual","checked":"[ \\"\$($cmd mode)\\" = manual ]"},
 $MENU_END
 EOF
@@ -185,27 +219,112 @@ find_partner() {
   fi
 }
 
+# --- sunrise and sunset -----------------------------------------------------
+
+system_timezone() {
+  local tz
+  tz=$(timedatectl show -p Timezone --value 2>/dev/null)
+  [[ -n $tz ]] || tz=$(readlink /etc/localtime 2>/dev/null | sed 's|.*/zoneinfo/||')
+  echo "$tz"
+}
+
+# Prints "lat lon" in decimal degrees, from LOCATION or from the time zone's
+# reference point in zone1970.tab. Prints nothing when unknown.
+location() {
+  if [[ -n $LOCATION ]]; then
+    echo "${LOCATION/,/ }"
+    return
+  fi
+  local tz coords tab
+  tz=$(system_timezone)
+  for tab in /usr/share/zoneinfo/zone1970.tab /usr/share/zoneinfo/zone.tab; do
+    [[ -f $tab ]] || continue
+    coords=$(awk -F'\t' -v tz="$tz" '$3 == tz { print $2; exit }' "$tab")
+    [[ -n $coords ]] && break
+  done
+  [[ -n $coords ]] || return 0
+  # ISO 6709: ±DDMM[SS]±DDDMM[SS]
+  awk -v c="$coords" 'function dms(s, d,   sign, deg, min, sec) {
+      sign = substr(s, 1, 1) == "-" ? -1 : 1
+      deg = substr(s, 2, d); min = substr(s, 2 + d, 2); sec = substr(s, 4 + d, 2)
+      return sign * (deg + min / 60 + sec / 3600)
+    }
+    BEGIN {
+      match(substr(c, 2), /[+-]/); split_at = RSTART + 1
+      printf "%.4f %.4f\n", dms(substr(c, 1, split_at - 1), 2), dms(substr(c, split_at), 3)
+    }'
+}
+
+# sun_times <YYYY-MM-DD> <lat> <lon>
+# Prints "<sunrise epoch> <sunset epoch>", or "day"/"night" when the sun
+# does not rise or set that day. Standard sunrise equation (about ±2 min).
+sun_times() {
+  local noon
+  noon=$(date -d "$1 12:00" +%s)
+  awk -v noon="$noon" -v lat="$2" -v lon="$3" '
+    function acos(x) { return atan2(sqrt(1 - x * x), x) }
+    function fmod(a, b) { a = a - b * int(a / b); return a < 0 ? a + b : a }
+    BEGIN {
+      r = atan2(0, -1) / 180
+      n = int(noon / 86400 + 2440587.5 - 2451545.0 + 0.0008 + 0.5)
+      js = n - lon / 360
+      M = fmod(357.5291 + 0.98560028 * js, 360)
+      C = 1.9148 * sin(M * r) + 0.02 * sin(2 * M * r) + 0.0003 * sin(3 * M * r)
+      L = fmod(M + C + 180 + 102.9372, 360)
+      jt = 2451545.0 + js + 0.0053 * sin(M * r) - 0.0069 * sin(2 * L * r)
+      sd = sin(L * r) * sin(23.4397 * r); cd = sqrt(1 - sd * sd)
+      cw = (sin(-0.833 * r) - sin(lat * r) * sd) / (cos(lat * r) * cd)
+      if (cw > 1) { print "night"; exit }
+      if (cw < -1) { print "day"; exit }
+      w = acos(cw) / r
+      printf "%d %d\n", (jt - w / 360 - 2440587.5) * 86400, (jt + w / 360 - 2440587.5) * 86400
+    }'
+}
+
+# day_switches <YYYY-MM-DD> — prints "<light epoch> <dark epoch>" for that day.
+# The sun schedule falls back to LIGHT_AT/DARK_AT when the location is unknown
+# or the sun does not rise or set that day.
+day_switches() {
+  local day=$1 loc times
+  if [[ $SCHEDULE == sun ]]; then
+    loc=$(location)
+    if [[ -n $loc ]]; then
+      times=$(sun_times "$day" $loc)
+      if [[ $times == *" "* ]]; then
+        read -r rise set <<<"$times"
+        echo "$((rise + SUNRISE_OFFSET * 60)) $((set + SUNSET_OFFSET * 60))"
+        return
+      fi
+    fi
+  fi
+  echo "$(date -d "$day $LIGHT_AT" +%s) $(date -d "$day $DARK_AT" +%s)"
+}
+
 # Most recent switch time (epoch seconds) and its period (light/dark).
 last_boundary() {
-  local now today yesterday best=0 kind="" t day
+  local now best=0 kind="" day light dark
   now=$(date +%s)
-  today=$(date +%F)
-  yesterday=$(date -d yesterday +%F)
-  for day in "$yesterday" "$today"; do
-    t=$(date -d "$day $LIGHT_AT" +%s); (( t <= now && t > best )) && { best=$t; kind=light; }
-    t=$(date -d "$day $DARK_AT" +%s);  (( t <= now && t > best )) && { best=$t; kind=dark; }
+  for day in "$(date -d yesterday +%F)" "$(date +%F)"; do
+    read -r light dark < <(day_switches "$day")
+    (( light <= now && light > best )) && { best=$light; kind=light; }
+    (( dark <= now && dark > best )) && { best=$dark; kind=dark; }
   done
   echo "$best $kind"
 }
 
-set_mode() {
+set_config() {
   mkdir -p "$(dirname "$CONFIG")"
-  if grep -q '^MODE=' "$CONFIG" 2>/dev/null; then
-    sed -i "s/^MODE=.*/MODE=$1/" "$CONFIG"
+  if grep -q "^$1=" "$CONFIG" 2>/dev/null; then
+    sed -i "s/^$1=.*/$1=$2/" "$CONFIG"
   else
-    echo "MODE=$1" >>"$CONFIG"
+    echo "$1=$2" >>"$CONFIG"
   fi
-  MODE=$1
+  printf -v "$1" '%s' "$2"
+}
+
+# auto mode + schedule, as one word: manual, time or sun
+mode_word() {
+  [[ $MODE == auto ]] && echo "$SCHEDULE" || echo manual
 }
 
 # --- commands ---------------------------------------------------------------
@@ -214,7 +333,7 @@ case ${1:-} in
   -h|--help|help)
     msg usage; echo; exit 0 ;;
   mode)
-    echo "$MODE"; exit 0 ;;
+    mode_word; exit 0 ;;
   language)
     echo "$LANGUAGE"; exit 0 ;;
   menu)
@@ -228,13 +347,21 @@ case ${1:-} in
     [[ $MODE == auto ]] && set -- manual || set -- auto ;;
 esac
 
+hhmm() { date -d "@$1" +%H:%M; }
+
 case ${1:-} in
-  auto)
-    set_mode auto
-    notify "$(msg notify_auto "$LIGHT_AT" "$DARK_AT")"
+  auto|time|sun)
+    [[ $1 == auto ]] || set_config SCHEDULE "$1"
+    set_config MODE auto
+    if [[ $SCHEDULE == sun ]]; then
+      read -r light dark < <(day_switches "$(date +%F)")
+      notify "$(msg notify_sun "$(hhmm "$light")" "$(hhmm "$dark")")"
+    else
+      notify "$(msg notify_auto "$LIGHT_AT" "$DARK_AT")"
+    fi
     set -- --now ;;
   manual)
-    set_mode manual
+    set_config MODE manual
     notify "$(msg notify_manual)"
     exit 0 ;;
   ''|--now|--status) ;;
@@ -247,10 +374,24 @@ partner=$(find_partner "$current")
 read -r boundary period < <(last_boundary)
 
 if [[ ${1:-} == --status ]]; then
-  msg st_mode "$MODE"; echo
+  msg st_mode "$(msg "mode_$(mode_word)")"; echo
   msg st_current "${current:-$(msg unknown)}${current:+ ($(theme_mode "$current"))}"; echo
   msg st_partner "${partner:-$(msg none)}${partner:+ ($(theme_mode "$partner"))}"; echo
-  msg st_period "$period" "$LIGHT_AT" "$DARK_AT"; echo
+  read -r light dark < <(day_switches "$(date +%F)")
+  msg st_period "$(msg "period_$period")" "$(hhmm "$light")" "$(hhmm "$dark")"
+  if [[ $SCHEDULE == sun ]]; then
+    loc=$(location)
+    [[ -n $loc && $(sun_times "$(date +%F)" $loc) != *" "* ]] && msg polar "$LIGHT_AT" "$DARK_AT"
+    echo
+    if [[ -n $LOCATION ]]; then
+      msg st_location "$LOCATION"
+    elif [[ -n $loc ]]; then
+      msg st_location "$(msg loc_tz "${loc/ /,}" "$(system_timezone)")"
+    else
+      msg st_location "$(msg loc_none "$LIGHT_AT" "$DARK_AT")"
+    fi
+  fi
+  echo
   exit 0
 fi
 

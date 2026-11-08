@@ -1,12 +1,25 @@
 # theme-schedule settings (read by ~/.local/bin/theme-schedule)
 
-# auto (switch by time) or manual
-# Change it from the menu (Appearance > Light/Dark) or with `theme-schedule auto|manual`.
+# auto or manual
+# Change it from the menu (Appearance > Light/Dark) or with `theme-schedule time|sun|manual`.
 MODE=manual
 
-# When to switch to the light and the dark theme (HH:MM)
+# What auto mode follows: time (LIGHT_AT / DARK_AT) or sun (sunrise / sunset)
+SCHEDULE=time
+
+# Clock times for the time schedule (HH:MM). The sun schedule also uses them
+# when the location is unknown or the sun does not rise or set that day.
 LIGHT_AT=07:00
 DARK_AT=18:00
+
+# Location for the sun schedule, as "latitude,longitude" in decimal degrees
+# (north and east positive), e.g. "35.68,139.77". Empty: estimated from the
+# system time zone.
+LOCATION=""
+
+# Minutes to shift the switch from sunrise / sunset (negative = earlier)
+SUNRISE_OFFSET=0
+SUNSET_OFFSET=0
 
 # Pairs that the naming rule (<name>-light and <name>) does not find.
 # One pair per line, light theme first, using the theme directory names.
